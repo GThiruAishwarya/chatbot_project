@@ -1,20 +1,15 @@
-#frontend 
+# frontend/app.py - Streamlit Frontend
 import streamlit as st
 import requests
 import os
 
-# --- Configuration (can be set via st.secrets) ---
-# Check if running locally or on Vercel
-IS_VERCEL = "VERCEL" in os.environ
-BACKEND_URL = "http://localhost:8000/api/query" if not IS_VERCEL else os.environ.get("VERCEL_URL")
+# --- Configuration ---
+# Use an environment variable set in the Render dashboard
+# Fallback to localhost for local development
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
-# For Vercel, the URL needs to be HTTPS and end with the endpoint path.
-if IS_VERCEL:
-    if BACKEND_URL.startswith("http://"):
-        BACKEND_URL = BACKEND_URL.replace("http://", "https://")
-    if BACKEND_URL.endswith("/"):
-        BACKEND_URL = BACKEND_URL[:-1]
-    BACKEND_URL += "/api/query"
+# The endpoint path is constant
+API_ENDPOINT = "/api/query"
 
 # --- Page Setup ---
 st.set_page_config(page_title="FAQ Chatbot", page_icon="💬")
@@ -45,13 +40,14 @@ if prompt := st.chat_input("Ask a question about our FAQs..."):
         with st.spinner("Thinking..."):
             try:
                 # Send the user query to the FastAPI backend
+                full_backend_url = f"{BACKEND_URL}{API_ENDPOINT}"
                 response = requests.post(
-                    BACKEND_URL,
+                    full_backend_url,
                     json={"query": prompt},
                     timeout=120 # Set a generous timeout for the LLM
                 )
                 response.raise_for_status() # Raise an exception for bad status codes
-                
+
                 # Parse the JSON response
                 result = response.json()
                 answer = result.get("answer", "I'm sorry, I could not find an answer.")
@@ -62,13 +58,13 @@ if prompt := st.chat_input("Ask a question about our FAQs..."):
                     answer_to_display = "I'm sorry, an issue occurred and I couldn't provide an answer."
                 else:
                     answer_to_display = answer
-                
+
                 # Display the full answer
                 st.markdown(answer_to_display)
-                
+
                 # Display the source information
                 st.info(f"Source: {source}")
-                
+
                 # Add assistant response to chat history
                 st.session_state.messages.append({
                     "role": "assistant",
@@ -80,5 +76,3 @@ if prompt := st.chat_input("Ask a question about our FAQs..."):
                 st.error(f"An error occurred while connecting to the backend: {e}")
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
-
-
