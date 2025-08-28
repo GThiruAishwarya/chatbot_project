@@ -74,7 +74,7 @@ def initialize_models_and_index():
     try:
         # Load Sentence-Transformer model for semantic search
         if model is None:
-            model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
+            model = SentenceTransformer('all-MiniLM-L6-v2')
             logging.info("Sentence-Transformer model loaded successfully.")
     except Exception as e:
         logging.error(f"Error initializing models: {e}")
