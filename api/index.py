@@ -1,4 +1,3 @@
-# main.py - FastAPI Backend
 import os
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -75,7 +74,7 @@ def initialize_models_and_index():
     try:
         # Load Sentence-Transformer model for semantic search
         if model is None:
-            model = SentenceTransformer('all-MiniLM-L6-v2')
+            model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
             logging.info("Sentence-Transformer model loaded successfully.")
     except Exception as e:
         logging.error(f"Error initializing models: {e}")
@@ -212,3 +211,4 @@ async def query_faq(request: QueryRequest):
     except Exception as e:
         logging.error(f"An error occurred during query processing: {e}")
         raise HTTPException(status_code=500, detail="Internal server error.")
+

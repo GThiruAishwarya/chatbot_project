@@ -76,3 +76,4 @@ if prompt := st.chat_input("Ask a question about our FAQs..."):
                 st.error(f"An error occurred while connecting to the backend: {e}")
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
+
