@@ -1,7 +1,7 @@
 # frontend/app.py - Streamlit Frontend
 import streamlit as st
-import requests
-import os
+import requests #http requests from frontend to fastapi
+import os #used for reading backend url when deployed in render 
 
 # --- Configuration ---
 # Use an environment variable set in the Render dashboard
