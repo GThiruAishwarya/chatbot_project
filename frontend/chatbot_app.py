@@ -11,8 +11,8 @@ st.set_page_config(page_title="RAG Chatbot", page_icon="🤖")
 backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # Set up the Streamlit interface.
-st.title("FAQ Chatbot with RAG")
-st.caption("🚀 A RAG-based chatbot powered by Gemini Pro")
+st.title("FAQ Chatbot")
+st.caption("🚀 A RAG-based chatbot powered by LLM FAISS")
 
 # Initialize chat history in the session state.
 if "messages" not in st.session_state:
