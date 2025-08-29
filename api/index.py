@@ -2,7 +2,7 @@ import os
 import csv
 import uvicorn
 import httpx
-import faiss # Used for efficient similarity search and clustering of dense vectors.
+import faiss
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,16 +10,13 @@ from pydantic import BaseModel
 
 # --- Step 1: Configuration and Setup ---
 
-# The API key must be set as a secret on Render.
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY environment variable not found.")
 
-# The FastAPI instance. This name is required for uvicorn.
 app = FastAPI()
 
-# Add CORS middleware to allow cross-origin requests from the frontend.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,15 +25,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic model for the incoming request body.
 class Prompt(BaseModel):
     user_prompt: str
 
-# Global variables to store the data, embeddings, and FAISS index.
 documents = []
 embeddings = None
 index = None
-client = httpx.AsyncClient() # Use a single client for all API calls
+client = httpx.AsyncClient()
 
 # --- Step 2: Functions for Embeddings and RAG ---
 
@@ -44,15 +39,13 @@ async def get_embedding(text: str):
     """
     Generates an embedding for a given text using the Gemini API's embedding model.
     """
-    # Use the correct, dedicated embedding model URL
+    # Corrected URL for the embedding model
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key={API_KEY}"
     
-    # Corrected payload structure for the embedContent endpoint
+    # Corrected payload structure
     payload = {
         "content": {
-            "parts": [{
-                "text": text
-            }]
+            "parts": [{"text": text}]
         }
     }
     
@@ -62,7 +55,6 @@ async def get_embedding(text: str):
         embedding_data = response.json()
         return np.array(embedding_data['embedding']['values'], dtype='float32')
     except httpx.HTTPStatusError as e:
-        # The error response text from the API is now included in the detail
         raise HTTPException(status_code=e.response.status_code, detail=f"Embedding API request failed: {e.response.text}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred during embedding: {str(e)}")
@@ -101,7 +93,6 @@ async def startup_event():
     """
     global documents, embeddings, index
     try:
-        # This is the corrected path.
         with open("api/data.csv", mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
@@ -145,40 +136,33 @@ async def generate_response(prompt: Prompt):
     
     # Strategy 2: RAG Pipeline for semantic matches with a confidence threshold.
     try:
-        # Generate an embedding for the user's query.
         query_embedding = await get_embedding(user_query)
         
-        # Search the FAISS index for the top 1 most similar document.
-        D, I = index.search(np.array([query_embedding]), k=1)
+        # Search the FAISS index for the top 3 most similar documents to get more context.
+        D, I = index.search(np.array([query_embedding]), k=3)
         
-        # L2 distance is used here. A lower value means the embeddings are closer.
-        # We set a simple, empirical threshold. You may need to tune this.
         distance_threshold = 0.6
         if D[0][0] > distance_threshold:
-            # The best match is too far away, indicating the query is likely out of scope.
             return {"response": "I am a FAQ based chatbot. I can only answer questions related to my knowledge base. Please ask a question related to the topics I was trained on."}
 
-        # Retrieve the relevant document from our list.
-        retrieved_doc = documents[I[0][0]]
-        retrieved_context = retrieved_doc['answer']
+        # Retrieve relevant documents and combine their content.
+        retrieved_contexts = [documents[i]['answer'] for i in I[0] if D[0][I[0].tolist().index(i)] <= distance_threshold]
+        combined_context = " ".join(retrieved_contexts)
         
         # Construct the RAG prompt for the LLM.
         rag_prompt = (
             "You are a friendly and helpful assistant for a FAQ chatbot. "
-            "Use the provided context to answer the user's question. "
+            "Provide a comprehensive answer to the user's question using the provided context. "
             "If the question cannot be answered from the context, "
             "politely say that you cannot provide an answer. "
-            f"\n\nContext: {retrieved_context}\n\nQuestion: {user_query}"
+            f"\n\nContext: {combined_context}\n\nQuestion: {user_query}"
         )
 
-        # Get the final response from the LLM.
         llm_response = await get_llm_response(rag_prompt)
         return {"response": llm_response}
 
     except HTTPException as e:
-        # If an HTTPException occurred during API calls, return that.
         raise e
     except Exception as e:
-        # If the RAG process fails for any other reason, return a generic error.
         print(f"RAG process failed, falling back to a generic error message. Error: {e}")
         return {"response": "I'm sorry, but I'm currently unable to process your request. Please try again later."}
