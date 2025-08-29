@@ -1,103 +1,184 @@
 import os
+import csv
 import uvicorn
 import httpx
+import faiss # Used for efficient similarity search and clustering of dense vectors.
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# This is a critical step: the API key must be stored securely as a Render secret.
-# NEVER hardcode your API key in the file.
+# --- Step 1: Configuration and Setup ---
+
+# The API key must be set as a secret on Render.
 API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Check if the API key is set at startup.
 if not API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not found. Please set it in your Render dashboard.")
+    raise ValueError("GEMINI_API_KEY environment variable not found.")
 
-# This is the FastAPI instance that the uvicorn server will run.
-# The name 'app' is mandatory for the startup command to work.
+# The FastAPI instance. This name is required for uvicorn.
 app = FastAPI()
 
-# Add CORS middleware to allow the frontend to communicate with this backend.
-# The allow_origins should be updated with your frontend URL in production.
+# Add CORS middleware to allow cross-origin requests from the frontend.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for development. Be more specific in production.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# This is the data model for the incoming request from the frontend.
+# Pydantic model for the incoming request body.
 class Prompt(BaseModel):
     user_prompt: str
+
+# Global variables to store the data, embeddings, and FAISS index.
+documents = []
+embeddings = None
+index = None
+client = httpx.AsyncClient() # Use a single client for all API calls
+
+# --- Step 2: Functions for Embeddings and RAG ---
+
+async def get_embedding(text: str):
+    """
+    Generates an embedding for a given text using the Gemini API's embedding model.
+    """
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:embedContent?key={API_KEY}"
+    payload = {
+        "model": {
+            "name": "models/embedding-001"
+        },
+        "content": {
+            "parts": [{
+                "text": text
+            }]
+        }
+    }
+    try:
+        response = await client.post(api_url, json=payload, timeout=60.0)
+        response.raise_for_status()
+        embedding_data = response.json()
+        return np.array(embedding_data['embedding']['values'], dtype='float32')
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Embedding API request failed: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during embedding: {str(e)}")
+
+async def get_llm_response(prompt_with_context: str):
+    """
+    Generates a text response from the Gemini API using the RAG prompt.
+    """
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={API_KEY}"
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": prompt_with_context
+            }]
+        }]
+    }
+    try:
+        response = await client.post(api_url, json=payload, timeout=120.0)
+        response.raise_for_status()
+        data = response.json()
+        if "candidates" in data and data["candidates"]:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        return "Sorry, I couldn't generate a response."
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"LLM API request failed: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during LLM generation: {str(e)}")
+
+# --- Step 3: Application Startup (Lifecycle events) ---
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    This function runs once when the application starts.
+    It's used to load data and build the FAISS index.
+    """
+    global documents, embeddings, index
+    try:
+        # Load the data from the CSV file.
+        with open("data.csv", mode='r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                documents.append(row)
+        
+        # Create embeddings for all answers in the CSV.
+        answer_texts = [doc['answer'] for doc in documents]
+        embeddings = np.array([await get_embedding(text) for text in answer_texts], dtype='float32')
+        
+        # Build a FAISS index for fast similarity search.
+        dimension = embeddings.shape[1]
+        index = faiss.IndexIDMap(faiss.IndexFlatL2(dimension))
+        index.add_with_ids(embeddings, np.arange(len(documents)))
+
+        print("Data loaded and FAISS index built successfully.")
+
+    except Exception as e:
+        print(f"Error during startup: {e}")
+        raise
+
+# --- Step 4: API Endpoints ---
 
 @app.get("/")
 def read_root():
     """
-    A simple test endpoint to verify the backend is running.
+    A simple test endpoint.
     """
     return {"status": "ok", "message": "Backend is running!"}
 
 @app.post("/generate")
 async def generate_response(prompt: Prompt):
     """
-    Endpoint to generate an embedding for a given text using the Gemini API.
-    This offloads the memory-intensive work to Google's servers.
+    Endpoint to handle user queries using a RAG pipeline with a safety guardrail.
     """
-    # Define the API endpoint and headers.
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={API_KEY}"
-    headers = {
-        "Content-Type": "application/json",
-    }
+    user_query = prompt.user_prompt.lower().strip()
+
+    # Strategy 1: Direct Lookup for exact or near-exact matches.
+    for doc in documents:
+        if user_query in doc['question'].lower() or user_query in doc['answer'].lower():
+            return {"response": doc['answer']}
     
-    # Construct the payload for the API call. We are asking for an embedding.
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": prompt.user_prompt
-            }]
-        }],
-        "generationConfig": {
-            # This is crucial for getting embedding as an output
-            "responseModalities": ["TEXT"]
-        },
-        "tools": [
-            {"google_search": {}}
-        ]
-    }
-    
+    # Strategy 2: RAG Pipeline for semantic matches with a confidence threshold.
     try:
-        # Use httpx to make an asynchronous POST request to the API.
-        async with httpx.AsyncClient() as client:
-            response = await client.post(api_url, json=payload, headers=headers)
-            response.raise_for_status() # Raises an exception for bad status codes (4xx or 5xx)
+        # Generate an embedding for the user's query.
+        query_embedding = await get_embedding(user_query)
         
-        # Parse the JSON response.
-        data = response.json()
+        # Search the FAISS index for the top 1 most similar document.
+        # D is the distance (lower is better), I is the index of the document.
+        D, I = index.search(np.array([query_embedding]), k=1)
         
-        # Check if the response contains the expected embedding.
-        if "candidates" in data and len(data["candidates"]) > 0:
-            candidate = data["candidates"][0]
-            if "content" in candidate and "parts" in candidate["content"] and len(candidate["content"]["parts"]) > 0:
-                # The Gemini API returns a generated text response.
-                # In this specific case, we'll just return the generated text.
-                # To get an embedding, you would use a different endpoint:
-                # https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent
-                # For this demonstration, we are just showing API usage for a text response.
-                generated_text = candidate["content"]["parts"][0]["text"]
-                return {"response": generated_text}
-            
-        # If the expected data is not found, raise an error.
-        raise HTTPException(status_code=500, detail="Gemini API response format is invalid.")
+        # L2 distance is used here. A lower value means the embeddings are closer.
+        # We set a simple, empirical threshold. You may need to tune this.
+        # A distance > 0.6 often indicates a poor match in many embedding spaces.
+        distance_threshold = 0.6
+        if D[0][0] > distance_threshold:
+            # The best match is too far away, indicating the query is likely out of scope.
+            return {"response": "I am a FAQ based chatbot. I can only answer questions related to snacks based on the provided information. Please ask a question related to my area of expertise."}
 
-    except httpx.HTTPStatusError as e:
-        # Handle API errors gracefully.
-        raise HTTPException(status_code=e.response.status_code, detail=f"API request failed: {e.response.text}")
+        # Retrieve the relevant document from our list.
+        retrieved_doc = documents[I[0][0]]
+        retrieved_context = retrieved_doc['answer']
+        
+        # Construct the RAG prompt for the LLM.
+        rag_prompt = (
+            "You are a friendly and helpful assistant for a snack business. "
+            "Use the provided context to answer the user's question. "
+            "If the question cannot be answered from the context, "
+            "politely say that you cannot provide an answer. "
+            f"\n\nContext: {retrieved_context}\n\nQuestion: {user_query}"
+        )
+
+        # Get the final response from the LLM.
+        llm_response = await get_llm_response(rag_prompt)
+        return {"response": llm_response}
+
+    except HTTPException as e:
+        # If an HTTPException occurred during API calls, return that.
+        raise e
     except Exception as e:
-        # Handle other unexpected errors.
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
-
-# This ensures uvicorn runs the app when the file is executed directly.
-# The Render deployment service will handle this automatically.
-if __name__ == "__main__":
-    uvicorn.run("api.index:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), reload=True)
+        # If the RAG process fails for any other reason, return a generic error.
+        print(f"RAG process failed, falling back to a generic error message. Error: {e}")
+        return {"response": "I'm sorry, but I'm currently unable to process your request. Please try again later."}
