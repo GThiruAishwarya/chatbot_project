@@ -44,23 +44,25 @@ async def get_embedding(text: str):
     """
     Generates an embedding for a given text using the Gemini API's embedding model.
     """
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:embedContent?key={API_KEY}"
+    # Use the correct, dedicated embedding model URL
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key={API_KEY}"
+    
+    # Corrected payload structure for the embedContent endpoint
     payload = {
-        "model": {
-            "name": "models/embedding-001"
-        },
         "content": {
             "parts": [{
                 "text": text
             }]
         }
     }
+    
     try:
         response = await client.post(api_url, json=payload, timeout=60.0)
         response.raise_for_status()
         embedding_data = response.json()
         return np.array(embedding_data['embedding']['values'], dtype='float32')
     except httpx.HTTPStatusError as e:
+        # The error response text from the API is now included in the detail
         raise HTTPException(status_code=e.response.status_code, detail=f"Embedding API request failed: {e.response.text}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred during embedding: {str(e)}")
