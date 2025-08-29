@@ -1,79 +1,55 @@
-# frontend/app.py - Streamlit Frontend
 import streamlit as st
-import requests #http requests from frontend to fastapi
-import os #used for reading backend url when deployed in render 
+import requests
+import json
+import base64
 
-# --- Configuration ---
-# Use an environment variable set in the Render dashboard
-# Fallback to localhost for local development
-BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
+# This is where you need to change the URL.
+# Replace this placeholder URL with the actual public URL of your backend service on Render.
+BACKEND_URL = "https://your-backend-service-name.onrender.com"
 
-# The endpoint path is constant
-API_ENDPOINT = "/api/query"
+st.title("Snacks Chatbot")
+st.write("Ask me anything about the snacks we sell!")
 
-# --- Page Setup ---
-st.set_page_config(page_title="FAQ Chatbot", page_icon="💬")
-st.title("FAQ Chatbot")
-st.caption("powered by FastAPI, Streamlit, and an LLM")
-
-# Initialize chat history in session state
+# Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat messages from history
+# Display chat messages from history on app rerun
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        if "source" in message:
-            st.info(f"Source: {message['source']}")
 
-# Handle user input
-if prompt := st.chat_input("Ask a question about our FAQs..."):
+# React to user input
+if prompt := st.chat_input("What is your question?"):
+    # Display user message in chat message container
+    st.chat_message("user").markdown(prompt)
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
-    # Display user message in chat message container
-    with st.chat_message("user"):
-        st.markdown(prompt)
 
-    # Display an empty placeholder for the bot's response
-    with st.chat_message("assistant"):
+    # Prepare data for the backend API call
+    payload = json.dumps({"user_prompt": prompt})
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        # Make the API call to the backend.
+        # This will now use the correct public URL.
         with st.spinner("Thinking..."):
-            try:
-                # Send the user query to the FastAPI backend
-                full_backend_url = f"{BACKEND_URL}{API_ENDPOINT}"
-                response = requests.post(
-                    full_backend_url,
-                    json={"query": prompt},
-                    timeout=120 # Set a generous timeout for the LLM
-                )
-                response.raise_for_status() # Raise an exception for bad status codes
+            response = requests.post(f"{BACKEND_URL}/generate", data=payload, headers=headers)
+            response.raise_for_status() # Raise an error for bad status codes
+            
+            # The backend returns a JSON object.
+            backend_response = response.json()
+            
+            # Extract the response from the JSON payload
+            chatbot_response = backend_response.get("response", "Sorry, I couldn't get a response from the server.")
+            
+    except requests.exceptions.RequestException as e:
+        chatbot_response = f"An error occurred while connecting to the backend: {e}"
+    except Exception as e:
+        chatbot_response = f"An unexpected error occurred: {e}"
 
-                # Parse the JSON response
-                result = response.json()
-                answer = result.get("answer", "I'm sorry, I could not find an answer.")
-                source = result.get("source", "Unknown")
-
-                # Check if the answer is empty or null and provide a fallback
-                if not answer or answer.lower() == 'nan':
-                    answer_to_display = "I'm sorry, an issue occurred and I couldn't provide an answer."
-                else:
-                    answer_to_display = answer
-
-                # Display the full answer
-                st.markdown(answer_to_display)
-
-                # Display the source information
-                st.info(f"Source: {source}")
-
-                # Add assistant response to chat history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer_to_display,
-                    "source": source
-                })
-
-            except requests.exceptions.RequestException as e:
-                st.error(f"An error occurred while connecting to the backend: {e}")
-            except Exception as e:
-                st.error(f"An unexpected error occurred: {e}")
-
+    # Display chatbot response in chat message container
+    with st.chat_message("assistant"):
+        st.markdown(chatbot_response)
+    # Add assistant response to chat history
+    st.session_state.messages.append({"role": "assistant", "content": chatbot_response})
