@@ -39,11 +39,12 @@ async def get_embedding(text: str):
     """
     Generates an embedding for a given text using the Gemini API's embedding model.
     """
-    # Corrected URL for the embedding model
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key={API_KEY}"
+    # Use the correct, dedicated embedding model URL
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:embedContent?key={API_KEY}"
     
-    # Corrected payload structure
+    # Corrected payload structure with explicit model
     payload = {
+        "model": "models/embedding-001",
         "content": {
             "parts": [{"text": text}]
         }
@@ -100,8 +101,11 @@ async def startup_event():
         
         # Create embeddings for all answers in the CSV.
         answer_texts = [doc['answer'] for doc in documents]
-        embeddings = np.array([await get_embedding(text) for text in answer_texts], dtype='float32')
         
+        # Use a list comprehension with await to get embeddings concurrently
+        embeddings_list = [await get_embedding(text) for text in answer_texts]
+        embeddings = np.array(embeddings_list, dtype='float32')
+
         # Build a FAISS index for fast similarity search.
         dimension = embeddings.shape[1]
         index = faiss.IndexIDMap(faiss.IndexFlatL2(dimension))
@@ -111,6 +115,7 @@ async def startup_event():
 
     except Exception as e:
         print(f"Error during startup: {e}")
+        # Re-raise the exception to fail the startup and show the error in the logs
         raise
 
 # --- Step 4: API Endpoints ---
@@ -141,6 +146,7 @@ async def generate_response(prompt: Prompt):
         # Search the FAISS index for the top 3 most similar documents to get more context.
         D, I = index.search(np.array([query_embedding]), k=3)
         
+        # Use a more flexible distance threshold.
         distance_threshold = 0.6
         if D[0][0] > distance_threshold:
             return {"response": "I am a FAQ based chatbot. I can only answer questions related to my knowledge base. Please ask a question related to the topics I was trained on."}
