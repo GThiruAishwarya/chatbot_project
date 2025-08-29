@@ -7,8 +7,9 @@ import base64
 # Replace this placeholder URL with the actual public URL of your backend service on Render.
 BACKEND_URL = "https://chatbot-project-knx9.onrender.com/"
 
-st.title("Snacks Chatbot")
-st.write("Ask me anything about the snacks we sell!")
+# --- Update the title here ---
+st.title("FAQ Chatbot")
+st.write("Ask me anything from my knowledge base!")
 
 # Initialize chat history
 if "messages" not in st.session_state:
