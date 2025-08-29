@@ -39,9 +39,7 @@ async def get_embedding(text: str):
     """
     Generates an embedding for a given text using the correct Gemini API embedding model.
     """
-    # The correct model for embeddings is 'embedding-001'.
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key={API_KEY}"
-    
     payload = {
         "content": {
             "parts": [{"text": text}]
@@ -97,7 +95,6 @@ async def startup_event():
             for row in reader:
                 documents.append(row)
         
-        # Create embeddings for all answers in the CSV.
         answer_texts = [doc['answer'] for doc in documents]
         
         # Use a list comprehension with await to get embeddings concurrently
