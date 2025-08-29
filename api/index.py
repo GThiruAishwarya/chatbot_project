@@ -99,8 +99,8 @@ async def startup_event():
     """
     global documents, embeddings, index
     try:
-        # Load the data from the CSV file.
-        with open("data.csv", mode='r', encoding='utf-8') as file:
+        # Use the correct relative path to the data.csv file.
+        with open("api/data.csv", mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
                 documents.append(row)
@@ -147,16 +147,14 @@ async def generate_response(prompt: Prompt):
         query_embedding = await get_embedding(user_query)
         
         # Search the FAISS index for the top 1 most similar document.
-        # D is the distance (lower is better), I is the index of the document.
         D, I = index.search(np.array([query_embedding]), k=1)
         
         # L2 distance is used here. A lower value means the embeddings are closer.
         # We set a simple, empirical threshold. You may need to tune this.
-        # A distance > 0.6 often indicates a poor match in many embedding spaces.
         distance_threshold = 0.6
         if D[0][0] > distance_threshold:
             # The best match is too far away, indicating the query is likely out of scope.
-            return {"response": "I am a FAQ based chatbot. I can only answer questions related to snacks based on the provided information. Please ask a question related to my area of expertise."}
+            return {"response": "I am a FAQ based chatbot. I can only answer questions related to my knowledge base. Please ask a question related to the topics I was trained on."}
 
         # Retrieve the relevant document from our list.
         retrieved_doc = documents[I[0][0]]
@@ -164,7 +162,7 @@ async def generate_response(prompt: Prompt):
         
         # Construct the RAG prompt for the LLM.
         rag_prompt = (
-            "You are a friendly and helpful assistant for a snack business. "
+            "You are a friendly and helpful assistant for a FAQ chatbot. "
             "Use the provided context to answer the user's question. "
             "If the question cannot be answered from the context, "
             "politely say that you cannot provide an answer. "
