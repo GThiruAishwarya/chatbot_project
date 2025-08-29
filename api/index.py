@@ -90,7 +90,11 @@ async def startup_event():
     """
     global documents, embeddings, index
     try:
-        with open("api/data.csv", mode='r', encoding='utf-8') as file:
+        # Use a path that is relative to the current file's directory
+        current_dir = os.path.dirname(__file__)
+        data_path = os.path.join(current_dir, "data.csv")
+
+        with open(data_path, mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
                 documents.append(row)
