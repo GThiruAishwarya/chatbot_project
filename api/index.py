@@ -99,7 +99,7 @@ async def startup_event():
     """
     global documents, embeddings, index
     try:
-        # Use the correct relative path to the data.csv file.
+        # This is the corrected path.
         with open("api/data.csv", mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
