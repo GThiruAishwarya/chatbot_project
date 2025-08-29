@@ -1,65 +1,83 @@
+import os
 import streamlit as st
 import requests
-import os
+import re
+import asyncio
 
-# Set the title and icon for the Streamlit app.
-st.set_page_config(page_title="RAG Chatbot", page_icon="🤖")
+# --- Step 1: Configuration and API Setup ---
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-# Use st.secrets to get the backend URL.
-# If you are running locally, use a .streamlit/secrets.toml file.
-# If you are deploying, set an environment variable.
-backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+# --- Step 2: Helper Functions for API Interaction and Query Splitting ---
+async def get_response(user_prompt: str):
+    """
+    Sends a single user prompt to the backend and returns the response.
+    """
+    try:
+        url = f"{BACKEND_URL}/generate"
+        response = requests.post(url, json={"user_prompt": user_prompt}, timeout=120)
+        response.raise_for_status()
+        return response.json().get("response", "No response from backend.")
+    except requests.exceptions.HTTPError as e:
+        st.error(f"HTTP Error: {e.response.text}")
+        return "An error occurred with the backend."
+    except requests.exceptions.RequestException as e:
+        st.error(f"Request Error: {e}")
+        return "Failed to connect to the backend."
 
-# Set up the Streamlit interface.
+def split_query(query: str):
+    """
+    Splits a multi-part user query into a list of individual questions.
+    Uses regex to split by punctuation like commas, and question marks.
+    """
+    # A simple regex to split by common delimiters.
+    # It also handles cases with multiple question marks or periods.
+    parts = re.split(r'[.,;?]\s*', query.strip())
+    # Filter out any empty strings that might result from splitting.
+    return [part for part in parts if part]
+
+# --- Step 3: Streamlit Application Layout and Logic ---
+st.set_page_config(page_title="FAQ Chatbot", layout="wide")
 st.title("FAQ Chatbot")
-st.caption("🚀 A RAG-based chatbot powered by LLM FAISS")
 
-# Initialize chat history in the session state.
+# Initialize chat history in session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat messages from history.
+# Display chat messages from history on app rerun
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Handle user input.
-if prompt := st.chat_input("Ask a question about the project..."):
-    # Add user message to chat history.
+# Main chat input loop
+if prompt := st.chat_input("Ask a question about our business..."):
+    # Add user message to chat history and display it
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Display the user's message.
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Prepare data for the backend request.
-    data = {"user_prompt": prompt}
+    # Process the user's prompt
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            # Split the user's question into parts
+            query_parts = split_query(prompt)
+            
+            # Use a list to store responses for each part
+            all_responses = []
 
-    try:
-        # Send the user's prompt to the backend API.
-        with st.spinner('Thinking...'):
-            response = requests.post(f"{backend_url}/generate", json=data)
-            
-            # Raise an error for bad status codes.
-            response.raise_for_status()
+            if len(query_parts) > 1:
+                # Handle multi-part questions
+                for part in query_parts:
+                    response_text = asyncio.run(get_response(part))
+                    all_responses.append(response_text)
+                
+                # Combine all responses into a single string for display
+                combined_response = " ".join(all_responses)
+            else:
+                # Handle single-part questions
+                combined_response = asyncio.run(get_response(prompt))
 
-            # Get the response text.
-            llm_response = response.json().get("response", "An error occurred.")
+            # Display the combined response
+            st.markdown(combined_response)
             
-            # Display the chatbot's response.
-            with st.chat_message("assistant"):
-                st.markdown(llm_response)
-            
-            # Add the chatbot's response to the chat history.
-            st.session_state.messages.append({"role": "assistant", "content": llm_response})
-    
-    except requests.exceptions.RequestException as e:
-        error_message = f"Failed to connect to the backend. Please check the backend URL and service status. Error: {e}"
-        with st.chat_message("assistant"):
-            st.error(error_message)
-        st.session_state.messages.append({"role": "assistant", "content": error_message})
-    except Exception as e:
-        error_message = f"An unexpected error occurred: {e}"
-        with st.chat_message("assistant"):
-            st.error(error_message)
-        st.session_state.messages.append({"role": "assistant", "content": error_message})
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": combined_response})
