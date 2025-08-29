@@ -37,14 +37,12 @@ client = httpx.AsyncClient()
 
 async def get_embedding(text: str):
     """
-    Generates an embedding for a given text using the Gemini API's embedding model.
+    Generates an embedding for a given text using the correct Gemini API embedding model.
     """
-    # Use the correct, dedicated embedding model URL
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:embedContent?key={API_KEY}"
+    # The correct model for embeddings is 'embedding-001'.
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key={API_KEY}"
     
-    # Corrected payload structure with explicit model
     payload = {
-        "model": "models/embedding-001",
         "content": {
             "parts": [{"text": text}]
         }
